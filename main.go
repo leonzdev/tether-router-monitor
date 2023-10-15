@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -40,6 +41,12 @@ func init() {
 	pushURL = os.Getenv("PUSH_URL")
 	username = os.Getenv("PUSH_USERNAME")
 	password = os.Getenv("PUSH_PASSWORD")
+}
+
+func getBasicAuthHeader(username, password string) string {
+	auth := username + ":" + password
+	encodedAuth := base64.StdEncoding.EncodeToString([]byte(auth))
+	return "Basic " + encodedAuth
 }
 
 func executeShellCommand(command string, args ...string) ([]byte, error) {
@@ -92,7 +99,11 @@ func pushMetrics(timeSeriesList []promremote.TimeSeries) {
 	}
 
 	ctx := context.Background()
-	opts := promremote.WriteOptions{}
+	opts := promremote.WriteOptions{
+		Headers: map[string]string{
+			"Authorization": getBasicAuthHeader(username, password),
+		},
+	}
 
 	if _, err := client.WriteTimeSeries(ctx, timeSeriesList, opts); err != nil {
 		log.Println("Error writing metrics:", err)
