@@ -57,6 +57,22 @@ func filterUSBInterfaces(ifdevData []Ifdev) []Ifdev {
 	return usbInterfaces
 }
 
+func getUSBDevice(interfaceName string) (string, error) {
+	ifusbOutput, err := executeShellCommand("ifusb", interfaceName)
+	if err != nil {
+		return "", fmt.Errorf("Error executing ifusb for %s: %v", interfaceName, err)
+	}
+
+	var usbInfo struct {
+		Device string `json:"device"`
+	}
+	if err := json.Unmarshal(ifusbOutput, &usbInfo); err != nil {
+		return "", fmt.Errorf("Error unmarshalling ifusb output: %v", err)
+	}
+
+	return usbInfo.Device, nil
+}
+
 func parseUptimeToSeconds(uptime string) float64 {
 	var hours, minutes, seconds float64
 	fmt.Sscanf(uptime, "%2fh:%2fm:%2fs", &hours, &minutes, &seconds)
@@ -111,13 +127,13 @@ loop:
 	for {
 		select {
 		case <-ticker.C:
-			ifdevOutput, err := executeShellCommand("./ifdev")
+			ifdevOutput, err := executeShellCommand("ifdev")
 			if err != nil {
 				log.Println("Error executing ifdev:", err)
 				break
 			}
 
-			mwan3ifstatusOutput, err := executeShellCommand("./mwan3ifstatus")
+			mwan3ifstatusOutput, err := executeShellCommand("mwan3ifstatus")
 			if err != nil {
 				log.Println("Error executing mwan3ifstatus:", err)
 				break
@@ -133,7 +149,11 @@ loop:
 
 			var timeSeriesList []promremote.TimeSeries
 			for _, data := range mwan3ifstatusData {
-				device := data.Interface
+				device, err := getUSBDevice(data.Interface)
+				if err != nil {
+					log.Printf("Error getting USB device for interface %s: %v", data.Interface, err)
+					continue
+				}
 				iface := data.Interface
 
 				uptimeInSeconds := parseUptimeToSeconds(data.Uptime)
