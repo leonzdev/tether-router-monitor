@@ -83,7 +83,24 @@ func pushMetrics(timeSeriesList []promremote.TimeSeries) {
 	}
 }
 
+func validateParameters() error {
+	if pushURL == "" {
+		return fmt.Errorf("PUSH_URL environment variable is not set")
+	}
+
+	if pushIntervalSeconds <= 0 {
+		return fmt.Errorf("PUSH_INTERVAL_SECONDS environment variable is not set or has an invalid value")
+	}
+
+	// Additional validations can be added here if needed
+
+	return nil
+}
+
 func main() {
+	if err := validateParameters(); err != nil {
+		log.Fatalf("Parameter validation failed: %s", err)
+	}
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
