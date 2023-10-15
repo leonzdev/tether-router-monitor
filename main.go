@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/m3dbx/prometheus_remote_client_golang/promremote"
+	"github.com/m3db/prometheus_remote_client_golang/promremote"
 )
 
 type Ifdev struct {
@@ -62,31 +63,21 @@ func parseUptimeToSeconds(uptime string) float64 {
 	return hours*3600 + minutes*60 + seconds
 }
 
-func pushMetrics(req promremote.WriteRequest) {
+func pushMetrics(timeSeriesList []promremote.TimeSeries) {
 	cfg := promremote.NewConfig(
-		pushURL,
-		promremote.WithHTTPClient(
-			&http.Client{
-				Transport: &http.Transport{
-					MaxIdleConns:        10,
-					IdleConnTimeout:     30 * time.Second,
-					DisableCompression:  true,
-					MaxIdleConnsPerHost: 10,
-				},
-			},
-		),
-		promremote.WithBasicAuth(username, password),
+		promremote.WriteURLOption(pushURL),
+		promremote.HTTPClientTimeoutOption(60*time.Second),
+		promremote.BasicAuth(username, password),
 	)
 
 	client, err := promremote.NewClient(cfg)
 	if err != nil {
-		fmt.Println("Error creating remote client:", err)
+		log.Println("Error creating remote client:", err)
 		return
 	}
 
-	err = client.Write(req)
-	if err != nil {
-		fmt.Println("Error writing metrics:", err)
+	if err := client.WriteTimeSeries(timeSeriesList); err != nil {
+		log.Println("Error writing metrics:", err)
 	}
 }
 
@@ -103,13 +94,13 @@ loop:
 		case <-ticker.C:
 			ifdevOutput, err := executeShellCommand("./ifdev")
 			if err != nil {
-				fmt.Println("Error executing ifdev:", err)
+				log.Println("Error executing ifdev:", err)
 				break
 			}
 
 			mwan3ifstatusOutput, err := executeShellCommand("./mwan3ifstatus")
 			if err != nil {
-				fmt.Println("Error executing mwan3ifstatus:", err)
+				log.Println("Error executing mwan3ifstatus:", err)
 				break
 			}
 
@@ -121,7 +112,7 @@ loop:
 
 			ifdevData = filterUSBInterfaces(ifdevData)
 
-			req := promremote.WriteRequest{}
+			var timeSeriesList []promremote.TimeSeries
 			for _, data := range ifdevData {
 				device := data.Device
 				iface := data.Interface
@@ -147,8 +138,8 @@ loop:
 					statusTracking = 1.0
 				}
 
-				// Add metrics to the write request
-				req.Add(promremote.Timeseries{
+				// Add metrics to the time series list
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_up_time"},
 						{Name: "device", Value: device},
@@ -160,7 +151,7 @@ loop:
 					},
 				})
 
-				req.Add(promremote.Timeseries{
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_online_time"},
 						{Name: "device", Value: device},
@@ -172,7 +163,7 @@ loop:
 					},
 				})
 
-				req.Add(promremote.Timeseries{
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_status_online"},
 						{Name: "device", Value: device},
@@ -184,7 +175,7 @@ loop:
 					},
 				})
 
-				req.Add(promremote.Timeseries{
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_status_enabled"},
 						{Name: "device", Value: device},
@@ -196,7 +187,7 @@ loop:
 					},
 				})
 
-				req.Add(promremote.Timeseries{
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_status_tracking"},
 						{Name: "device", Value: device},
@@ -210,10 +201,10 @@ loop:
 			}
 
 			// Push metrics
-			pushMetrics(req)
+			pushMetrics(timeSeriesList)
 
 		case sig := <-sigChan:
-			fmt.Printf("Received signal: %s. Exiting...\n", sig)
+			log.Printf("Received signal: %s. Exiting...\n", sig)
 			break loop
 		}
 	}
