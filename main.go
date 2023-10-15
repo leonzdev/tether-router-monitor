@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -67,7 +67,6 @@ func pushMetrics(timeSeriesList []promremote.TimeSeries) {
 	cfg := promremote.NewConfig(
 		promremote.WriteURLOption(pushURL),
 		promremote.HTTPClientTimeoutOption(60*time.Second),
-		promremote.BasicAuth(username, password),
 	)
 
 	client, err := promremote.NewClient(cfg)
@@ -76,7 +75,10 @@ func pushMetrics(timeSeriesList []promremote.TimeSeries) {
 		return
 	}
 
-	if err := client.WriteTimeSeries(timeSeriesList); err != nil {
+	ctx := context.Background()
+	opts := promremote.WriteOptions{}
+
+	if _, err := client.WriteTimeSeries(ctx, timeSeriesList, opts); err != nil {
 		log.Println("Error writing metrics:", err)
 	}
 }
@@ -113,8 +115,8 @@ loop:
 			ifdevData = filterUSBInterfaces(ifdevData)
 
 			var timeSeriesList []promremote.TimeSeries
-			for _, data := range ifdevData {
-				device := data.Device
+			for _, data := range mwan3ifstatusData {
+				device := data.Interface
 				iface := data.Interface
 
 				uptimeInSeconds := parseUptimeToSeconds(data.Uptime)
@@ -138,7 +140,7 @@ loop:
 					statusTracking = 1.0
 				}
 
-				// Add metrics to the time series list
+// Add metrics to the time series list
 				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_up_time"},
@@ -198,6 +200,7 @@ loop:
 						Value:     statusTracking,
 					},
 				})
+
 			}
 
 			// Push metrics
