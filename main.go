@@ -71,13 +71,13 @@ func getUSBDevice(interfaceName string) (string, error) {
 	}
 
 	var usbInfo struct {
-		Device string `json:"device"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(ifusbOutput, &usbInfo); err != nil {
 		return "", fmt.Errorf("Error unmarshalling ifusb output: %v", err)
 	}
 
-	return usbInfo.Device, nil
+	return usbInfo.Description, nil
 }
 
 func parseUptimeToSeconds(uptime string) float64 {
