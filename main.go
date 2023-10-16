@@ -95,7 +95,7 @@ func parseUptimeToSeconds(uptime string) float64 {
 	return hours*3600 + minutes*60 + seconds
 }
 
-func mergeData(ifdevData []Ifdev, mwan3Data []mwan3ifstatusData) []CombinedData {
+func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus) []CombinedData {
 	var combined []CombinedData
 
 	// Create a map with Interface as the key and the Ifdev struct as the value
