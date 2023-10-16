@@ -29,6 +29,15 @@ type Mwan3ifstatus struct {
 	Tracking    string `json:"tracking"`
 }
 
+type CombinedData struct {
+	Interface    string `json:"interface"`
+	Device       string `json:"device"`
+	Status       string `json:"status"`
+	OnlineTime   string `json:"online_time"`
+	Uptime       string `json:"uptime"`
+	Tracking     string `json:"tracking"`
+}
+
 var (
 	pushIntervalSeconds int
 	pushURL             string
@@ -84,6 +93,32 @@ func parseUptimeToSeconds(uptime string) float64 {
 	var hours, minutes, seconds float64
 	fmt.Sscanf(uptime, "%2fh:%2fm:%2fs", &hours, &minutes, &seconds)
 	return hours*3600 + minutes*60 + seconds
+}
+
+func mergeData(ifdevData []Ifdev, mwan3Data []mwan3ifstatusData) []CombinedData {
+	var combined []CombinedData
+
+	// Create a map with Interface as the key and the Ifdev struct as the value
+	ifdevMap := make(map[string]Ifdev)
+	for _, ifdev := range ifdevData {
+		ifdevMap[ifdev.Interface] = ifdev
+	}
+
+	// Iterate over mwan3Data and merge using the map
+	for _, mwan3 := range mwan3Data {
+		if ifdev, exists := ifdevMap[mwan3.Interface]; exists {
+			combined = append(combined, CombinedData{
+				Interface:  ifdev.Interface,
+				Device:     ifdev.Device,
+				Status:     mwan3.Status,
+				OnlineTime: mwan3.OnlineTime,
+				Uptime:     mwan3.Uptime,
+				Tracking:   mwan3.Tracking,
+			})
+		}
+	}
+
+	return combined
 }
 
 func pushMetrics(timeSeriesList []promremote.TimeSeries) {
@@ -159,8 +194,9 @@ loop:
 			ifdevData = filterUSBInterfaces(ifdevData)
 
 			var timeSeriesList []promremote.TimeSeries
-			for _, data := range mwan3ifstatusData {
-				device, err := getUSBDevice(data.Interface)
+			combinedData := mergeData(ifdevData, mwan3ifstatusData)
+			for _, data := range combinedData {
+				device, err := getUSBDevice(data.Device)
 				if err != nil {
 					log.Printf("Error getting USB device for interface %s: %v", data.Interface, err)
 					continue
