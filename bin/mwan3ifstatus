@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Declare an array to hold the JSON results
+declare -a json_array
+
+# Process each line of the mwan3 interface command
+while IFS= read -r line; do
+    # Extract the interface name, status, uptime (if available), and tracking status
+    if [[ $line =~ interface\ ([a-zA-Z0-9_\-]+)\ is\ (online|offline)\ ([0-9a-zA-Z: ]+)?,\ uptime\ ([0-9a-zA-Z: ]+)?\ and\ tracking\ is\ (active|paused) ]]; then
+        iface="${BASH_REMATCH[1]}"
+        status="${BASH_REMATCH[2]}"
+        online_time="${BASH_REMATCH[3]}"
+        uptime="${BASH_REMATCH[4]}"
+        tracking="${BASH_REMATCH[5]}"
+
+        # Append to the JSON array
+        json_array+=("{\"interface\":\"$iface\",\"status\":\"$status\",\"online_time\":\"$online_time\",\"uptime\":\"$uptime\",\"tracking\":\"$tracking\"}")
+    fi
+done < <(mwan3 interfaces)
+
+# Join the array elements into a comma-separated string and wrap with square brackets for JSON output
+echo "[" "${json_array[@]}" "]" | sed 's/} {/}, {/g'
+

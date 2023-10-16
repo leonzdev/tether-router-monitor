@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Function to convert bus, device numbers, and description to JSON format
+to_json() {
+    local busnum="$1"
+    local devnum="$2"
+    local description="$3"
+    echo -n "{ \"bus\": \"$busnum\", \"device\": \"$devnum\", \"description\": \"$description\" }"
+}
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <interface_name>"
+    exit 1
+fi
+
+INTERFACE=$1
+
+# Check if the network interface exists
+if [ ! -d "/sys/class/net/$INTERFACE" ]; then
+    echo "null"
+    exit 0
+fi
+
+# Navigate to the sysfs directory for the network interface
+SYSFS_PATH=$(readlink -f /sys/class/net/$INTERFACE/device)
+
+# Traverse upwards to find the directory containing busnum and devnum
+while [[ ! -e "$SYSFS_PATH/busnum" || ! -e "$SYSFS_PATH/devnum" ]]; do
+    SYSFS_PATH=$(dirname "$SYSFS_PATH")
+    if [ "$SYSFS_PATH" == "/" ]; then
+        echo "null"
+        exit 0
+    fi
+done
+
+# Extract busnum and devnum
+BUSNUM=$(printf "%03d" $(cat "$SYSFS_PATH/busnum"))
+DEVNUM=$(printf "%03d" $(cat "$SYSFS_PATH/devnum"))
+
+# Get the human-readable name from lsusb
+DESCRIPTION=$(lsusb | grep "Bus $BUSNUM Device $DEVNUM:" | sed -r 's/^Bus [0-9]{3} Device [0-9]{3}: ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4} //')
+
+# Output in JSON format
+echo "$(to_json "$BUSNUM" "$DEVNUM" "$DESCRIPTION")"
+

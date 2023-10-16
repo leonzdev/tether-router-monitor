@@ -1,0 +1,25 @@
+#!/usr/bin/lua
+
+local uci = require("uci")
+
+local cursor = uci.cursor()
+local interfaces = {}
+
+cursor:foreach("network", "interface", function(section)
+    local interface_name = section[".name"]
+    local device = section["device"]
+    if interface_name and device then
+        table.insert(interfaces, {interface=interface_name, device=device})
+    end
+end)
+
+-- Print in a structured list format
+print("[")
+for i, entry in ipairs(interfaces) do
+    print(string.format('  { "interface": "%s", "device": "%s" }%s', 
+                        entry.interface, 
+                        entry.device,
+                        i < #interfaces and "," or ""))
+end
+print("]")
+
