@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+        "strings"
 	"syscall"
 	"time"
 
@@ -90,10 +91,31 @@ func getUSBDevice(interfaceName string) (string, error) {
 }
 
 func parseUptimeToSeconds(uptime string) float64 {
-	var hours, minutes, seconds float64
-	fmt.Sscanf(uptime, "%2fh:%2fm:%2fs", &hours, &minutes, &seconds)
-	return hours*3600 + minutes*60 + seconds
+    // Split the uptime string by colons
+    parts := strings.Split(uptime, ":")
+    if len(parts) != 3 {
+        return 0 // or handle the error appropriately
+    }
+
+    // Remove the 'h', 'm', and 's' characters and parse the numbers
+    hours, err := strconv.ParseFloat(strings.TrimSuffix(parts[0], "h"), 64)
+    if err != nil {
+        return 0 // or handle the error appropriately
+    }
+
+    minutes, err := strconv.ParseFloat(strings.TrimSuffix(parts[1], "m"), 64)
+    if err != nil {
+        return 0 // or handle the error appropriately
+    }
+
+    seconds, err := strconv.ParseFloat(strings.TrimSuffix(parts[2], "s"), 64)
+    if err != nil {
+        return 0 // or handle the error appropriately
+    }
+
+    return hours*3600 + minutes*60 + seconds
 }
+
 
 func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus) []CombinedData {
 	var combined []CombinedData
