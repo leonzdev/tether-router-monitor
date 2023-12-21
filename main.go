@@ -9,8 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strconv"
-        "strings"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,20 +24,28 @@ type Ifdev struct {
 }
 
 type Mwan3ifstatus struct {
-	Interface   string `json:"interface"`
-	Status      string `json:"status"`
-	OnlineTime  string `json:"online_time"`
-	Uptime      string `json:"uptime"`
-	Tracking    string `json:"tracking"`
+	Interface  string `json:"interface"`
+	Status     string `json:"status"`
+	OnlineTime string `json:"online_time"`
+	Uptime     string `json:"uptime"`
+	Tracking   string `json:"tracking"`
 }
 
 type CombinedData struct {
-	Interface    string `json:"interface"`
-	Device       string `json:"device"`
-	Status       string `json:"status"`
-	OnlineTime   string `json:"online_time"`
-	Uptime       string `json:"uptime"`
-	Tracking     string `json:"tracking"`
+	Interface  string `json:"interface"`
+	Device     string `json:"device"`
+	Status     string `json:"status"`
+	OnlineTime string `json:"online_time"`
+	Uptime     string `json:"uptime"`
+	Tracking   string `json:"tracking"`
+	RX         int64  `json:"rx"` // Bytes received
+	TX         int64  `json:"tx"` // Bytes sent
+}
+
+type NetworkTraffic struct {
+	Interface string
+	RX        int64 // Bytes received
+	TX        int64 // Bytes sent
 }
 
 var (
@@ -91,33 +100,79 @@ func getUSBDevice(interfaceName string) (string, error) {
 }
 
 func parseUptimeToSeconds(uptime string) float64 {
-    // Split the uptime string by colons
-    parts := strings.Split(uptime, ":")
-    if len(parts) != 3 {
-        return 0 // or handle the error appropriately
-    }
+	// Split the uptime string by colons
+	parts := strings.Split(uptime, ":")
+	if len(parts) != 3 {
+		return 0 // or handle the error appropriately
+	}
 
-    // Remove the 'h', 'm', and 's' characters and parse the numbers
-    hours, err := strconv.ParseFloat(strings.TrimSuffix(parts[0], "h"), 64)
-    if err != nil {
-        return 0 // or handle the error appropriately
-    }
+	// Remove the 'h', 'm', and 's' characters and parse the numbers
+	hours, err := strconv.ParseFloat(strings.TrimSuffix(parts[0], "h"), 64)
+	if err != nil {
+		return 0 // or handle the error appropriately
+	}
 
-    minutes, err := strconv.ParseFloat(strings.TrimSuffix(parts[1], "m"), 64)
-    if err != nil {
-        return 0 // or handle the error appropriately
-    }
+	minutes, err := strconv.ParseFloat(strings.TrimSuffix(parts[1], "m"), 64)
+	if err != nil {
+		return 0 // or handle the error appropriately
+	}
 
-    seconds, err := strconv.ParseFloat(strings.TrimSuffix(parts[2], "s"), 64)
-    if err != nil {
-        return 0 // or handle the error appropriately
-    }
+	seconds, err := strconv.ParseFloat(strings.TrimSuffix(parts[2], "s"), 64)
+	if err != nil {
+		return 0 // or handle the error appropriately
+	}
 
-    return hours*3600 + minutes*60 + seconds
+	return hours*3600 + minutes*60 + seconds
 }
 
+func getNetworkTraffic() (map[string]NetworkTraffic, error) {
+	cmd := exec.Command("ifconfig") // or use 'ip -s link'
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
 
-func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus) []CombinedData {
+	return parseNetworkTraffic(string(output)), nil
+}
+
+func parseNetworkTraffic(output string) map[string]NetworkTraffic {
+	trafficData := make(map[string]NetworkTraffic)
+	blocks := strings.Split(output, "\n\n") // Split output into blocks
+
+	rxTxRegex := regexp.MustCompile(`RX bytes:(\d+) .* TX bytes:(\d+)`)
+	for _, block := range blocks {
+		lines := strings.Split(block, "\n")
+		if len(lines) > 0 {
+			// The first line should contain the interface name
+			interfaceLine := lines[0]
+			parts := strings.Fields(interfaceLine)
+			if len(parts) > 0 {
+				currentInterface := parts[0]
+
+				// Search for RX and TX bytes in the remaining lines
+				for _, line := range lines {
+					if strings.Contains(line, "RX bytes") {
+						matches := rxTxRegex.FindStringSubmatch(line)
+						if len(matches) == 3 {
+							rx, _ := strconv.ParseInt(matches[1], 10, 64)
+							tx, _ := strconv.ParseInt(matches[2], 10, 64)
+							trafficData[currentInterface] = NetworkTraffic{
+								Interface: currentInterface,
+								RX:        rx,
+								TX:        tx,
+							}
+							break // Exit the loop once RX and TX are found
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return trafficData
+}
+
+func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus, networkTrafficData map[string]NetworkTraffic) []CombinedData {
 	var combined []CombinedData
 
 	// Create a map with Interface as the key and the Ifdev struct as the value
@@ -129,6 +184,7 @@ func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus) []CombinedData {
 	// Iterate over mwan3Data and merge using the map
 	for _, mwan3 := range mwan3Data {
 		if ifdev, exists := ifdevMap[mwan3.Interface]; exists {
+			traffic := networkTrafficData[ifdev.Device]
 			combined = append(combined, CombinedData{
 				Interface:  ifdev.Interface,
 				Device:     ifdev.Device,
@@ -136,6 +192,8 @@ func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus) []CombinedData {
 				OnlineTime: mwan3.OnlineTime,
 				Uptime:     mwan3.Uptime,
 				Tracking:   mwan3.Tracking,
+				RX:         traffic.RX,
+				TX:         traffic.TX,
 			})
 		}
 	}
@@ -206,7 +264,10 @@ loop:
 				log.Println("Error executing mwan3ifstatus:", err)
 				break
 			}
-
+			networkTraffic, err := getNetworkTraffic()
+			if err != nil {
+				log.Println("Error getting network traffic:", err)
+			}
 			var ifdevData []Ifdev
 			var mwan3ifstatusData []Mwan3ifstatus
 
@@ -216,7 +277,7 @@ loop:
 			ifdevData = filterUSBInterfaces(ifdevData)
 
 			var timeSeriesList []promremote.TimeSeries
-			combinedData := mergeData(ifdevData, mwan3ifstatusData)
+			combinedData := mergeData(ifdevData, mwan3ifstatusData, networkTraffic)
 			for _, data := range combinedData {
 				device, err := getUSBDevice(data.Device)
 				if err != nil {
@@ -246,7 +307,7 @@ loop:
 					statusTracking = 1.0
 				}
 
-// Add metrics to the time series list
+				// Add metrics to the time series list
 				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
 					Labels: []promremote.Label{
 						{Name: "__name__", Value: "tether_iface_up_time"},
@@ -307,6 +368,29 @@ loop:
 					},
 				})
 
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
+					Labels: []promremote.Label{
+						{Name: "__name__", Value: "tether_iface_tx"},
+						{Name: "device", Value: device},
+						{Name: "interface", Value: iface},
+					},
+					Datapoint: promremote.Datapoint{
+						Timestamp: time.Now(),
+						Value:     float64(data.TX),
+					},
+				})
+
+				timeSeriesList = append(timeSeriesList, promremote.TimeSeries{
+					Labels: []promremote.Label{
+						{Name: "__name__", Value: "tether_iface_rx"},
+						{Name: "device", Value: device},
+						{Name: "interface", Value: iface},
+					},
+					Datapoint: promremote.Datapoint{
+						Timestamp: time.Now(),
+						Value:     float64(data.RX),
+					},
+				})
 			}
 
 			// Push metrics
