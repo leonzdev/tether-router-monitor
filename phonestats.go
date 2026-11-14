@@ -22,6 +22,7 @@ const phoneStatsCommand = `echo @@battery; dumpsys battery; ` +
 	`echo @@thermal; dumpsys thermalservice; ` +
 	`echo @@telephony; dumpsys telephony.registry | grep -E 'Phone Id=|mServiceState=|mSignalStrength=|mTelephonyDisplayInfo=|mDataConnectionState=' | ` +
 	`sed 's/mServiceState=.*\(mDataRegState=[-0-9]*\).*/mServiceState={\1}/'; ` +
+	`echo @@tethering; dumpsys tethering | grep -E 'mUsbTetheringFunction'; ` +
 	`echo @@uptime; cat /proc/uptime; ` +
 	`echo @@props; echo "model=$(getprop ro.product.model)"; echo "android=$(getprop ro.build.version.release)"`
 
@@ -442,6 +443,18 @@ func parseSignalStrength(slot, line string, active *bool) []sample {
 		}
 	}
 	return out
+}
+
+// parseTetherFunction returns the phone's USB tethering function ("RNDIS" or
+// "NCM") from the "mUsbTetheringFunction: RNDIS" line of `dumpsys tethering`
+// (Android 13+), or "" if the phone doesn't report it.
+func parseTetherFunction(out string) string {
+	for _, line := range splitSections(out)["tethering"] {
+		if _, v, ok := strings.Cut(line, "mUsbTetheringFunction:"); ok {
+			return strings.ToUpper(strings.TrimSpace(v))
+		}
+	}
+	return ""
 }
 
 // parseUptime parses /proc/uptime ("12345.67 23456.78").
