@@ -54,6 +54,8 @@ var (
 	pushURL             string
 	username            string
 	password            string
+
+	sysRoot = "/sys" // overridden in tests
 )
 
 func init() {
@@ -97,7 +99,21 @@ func getUSBDevice(interfaceName string) (string, error) {
 		return "", fmt.Errorf("Error unmarshalling ifusb output: %v", err)
 	}
 
-	return usbInfo.Description, nil
+	description := strings.TrimSpace(usbInfo.Description)
+	if description == "" {
+		// lsusb has no line for the device, usually because the phone is being
+		// unplugged while mwan3 still reports the interface. Fall back to the
+		// USB device strings in sysfs; if the device is gone there too, fail,
+		// so no series without a device label gets pushed (dashboards would
+		// show it as a nameless "Value").
+		if id, err := usbDeviceID(sysRoot, interfaceName); err == nil {
+			description = usbDeviceName(sysRoot, id)
+		}
+	}
+	if description == "" {
+		return "", fmt.Errorf("no USB device found for %s (unplugged?)", interfaceName)
+	}
+	return description, nil
 }
 
 func parseUptimeToSeconds(uptime string) float64 {
@@ -302,18 +318,19 @@ loop:
 			var timeSeriesList []promremote.TimeSeries
 			combinedData := mergeData(ifdevData, mwan3ifstatusData, networkTraffic)
 
-			// USB device behind each tethered interface, so the ADB collector
-			// only talks to tethered phones and its metrics get the same labels.
+			// USB device behind each tethered interface: for its USB link speed,
+			// and so the ADB collector only talks to tethered phones and its
+			// metrics get the same labels.
 			usbIDs := make(map[string]string)
 			matchedPhones := make(map[string]bool)
-			if phones != nil {
-				targets := make(map[string]bool)
-				for _, data := range combinedData {
-					if id, err := usbDeviceID("/sys", data.Device); err == nil {
-						usbIDs[data.Device] = id
-						targets[id] = true
-					}
+			targets := make(map[string]bool)
+			for _, data := range combinedData {
+				if id, err := usbDeviceID(sysRoot, data.Device); err == nil {
+					usbIDs[data.Device] = id
+					targets[id] = true
 				}
+			}
+			if phones != nil {
 				phones.setTargets(targets)
 			}
 
@@ -432,11 +449,19 @@ loop:
 				})
 
 				if id, ok := usbIDs[data.Device]; ok {
-					matchedPhones[id] = true
-					timeSeriesList = phones.appendSeries(timeSeriesList, id, []promremote.Label{
+					base := []promremote.Label{
 						{Name: "device", Value: device},
 						{Name: "interface", Value: iface},
-					}, time.Now())
+					}
+					// USB link speed: 480 means the phone is running in USB 2.0
+					// mode, which also caps a standard port at 500 mA.
+					if mbps, ok := usbSpeedMbps(sysRoot, id); ok {
+						timeSeriesList = append(timeSeriesList, newSeries("tether_iface_usb_speed_mbps", mbps, time.Now(), base, promremote.Label{Name: "usb_port", Value: id}))
+					}
+					if phones != nil {
+						matchedPhones[id] = true
+						timeSeriesList = phones.appendSeries(timeSeriesList, id, base, time.Now())
+					}
 				}
 			}
 

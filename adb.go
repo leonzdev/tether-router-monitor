@@ -121,6 +121,7 @@ type phoneSnapshot struct {
 	Raw            string    // raw command output (only kept for -adb-dump)
 	Serial         string
 	Name           string // USB manufacturer + product, like lsusb (used when no interface label applies)
+	Target         bool   // backed one of the router's tethered interfaces at the last poll
 	Tethering      bool   // the phone's USB device has a network interface on this host
 	TetherFunction string // the phone's USB tethering function (RNDIS or NCM), if it reports one
 }
@@ -457,6 +458,7 @@ func (c *adbCollector) collect(ctx context.Context, pc *phoneConn, st usbState) 
 		SampledAt:      time.Now(),
 		Serial:         d.Serial,
 		Name:           st.name,
+		Target:         st.tethered,
 		Tethering:      st.tethered || st.tethering,
 		TetherFunction: function,
 	}
@@ -549,6 +551,7 @@ func (c *adbCollector) markDown(d *adbusb.DeviceInfo, st usbState, unauthorized 
 	snap.Unauthorized = unauthorized
 	snap.Serial = d.Serial
 	snap.Name = st.name
+	snap.Target = st.tethered
 	snap.Tethering = st.tethered || st.tethering
 	c.snaps[d.ID] = snap
 	c.mu.Unlock()
@@ -559,6 +562,18 @@ func (c *adbCollector) markDown(d *adbusb.DeviceInfo, st usbState, unauthorized 
 func usbHasNetdev(sysRoot, id string) bool {
 	matches, _ := filepath.Glob(filepath.Join(sysRoot, "bus", "usb", "devices", id+":*", "net", "*"))
 	return len(matches) > 0
+}
+
+// usbSpeedMbps returns a USB device's link speed from sysfs: 480 for USB 2.0
+// High Speed, 5000 for USB 3.x Gen 1, 10000 for Gen 2 (12 and 1.5 for older
+// devices).
+func usbSpeedMbps(sysRoot, id string) (float64, bool) {
+	buf, err := os.ReadFile(filepath.Join(sysRoot, "bus", "usb", "devices", id, "speed"))
+	if err != nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(string(buf)), 64)
+	return v, err == nil && v > 0
 }
 
 // usbDeviceName returns "<manufacturer> <product>" from the USB device strings,
@@ -621,12 +636,14 @@ func (c *adbCollector) appendSeries(list []promremote.TimeSeries, usbID string, 
 // router's tethered interfaces (matched holds the USB ids that were), i.e.
 // known phones plugged in with USB tethering off. They are labelled with the
 // phone's USB name only, so dashboards that group by device still find them.
+// A phone that backed a tethered interface at its last poll but isn't matched
+// now is being unplugged; it is left out until the next poll catches up.
 func (c *adbCollector) appendUntethered(list []promremote.TimeSeries, matched map[string]bool, now time.Time) []promremote.TimeSeries {
 	c.mu.Lock()
 	type phone struct{ id, name string }
 	var phones []phone
 	for id, snap := range c.snaps {
-		if !matched[id] {
+		if !matched[id] && !snap.Target {
 			name := snap.Name
 			if name == "" {
 				name = "usb " + id
@@ -726,7 +743,8 @@ func runADBDump(cfg adbConfig, raw bool) int {
 	code := 0
 	for _, id := range slices.Sorted(maps.Keys(c.snaps)) {
 		snap := c.snaps[id]
-		fmt.Printf("# usb %s %q serial=%q up=%t usb_tethering=%t tether_function=%q\n", id, snap.Name, snap.Serial, snap.Up, snap.Tethering, snap.TetherFunction)
+		speed, _ := usbSpeedMbps(c.sysRoot, id)
+		fmt.Printf("# usb %s %q serial=%q up=%t usb_speed_mbps=%g usb_tethering=%t tether_function=%q\n", id, snap.Name, snap.Serial, snap.Up, speed, snap.Tethering, snap.TetherFunction)
 		if !snap.Up {
 			code = 1
 		}
