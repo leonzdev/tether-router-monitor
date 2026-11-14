@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -240,11 +241,33 @@ func validateParameters() error {
 }
 
 func main() {
+	adbDump := flag.Bool("adb-dump", false, "connect to every USB ADB device on this machine, print its phone metrics, and exit")
+	adbRaw := flag.Bool("adb-raw", false, "with -adb-dump, also print the raw output read from each phone")
+	flag.Parse()
+
+	adbCfg := loadADBConfig()
+	if *adbDump {
+		os.Exit(runADBDump(adbCfg, *adbRaw))
+	}
+
 	if err := validateParameters(); err != nil {
 		log.Fatalf("Parameter validation failed: %s", err)
 	}
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var phones *adbCollector
+	if adbCfg.Enabled {
+		var err error
+		if phones, err = newADBCollector(adbCfg); err != nil {
+			log.Printf("ADB phone metrics disabled: %v", err)
+		} else {
+			go phones.run(ctx)
+		}
+	}
 
 	ticker := time.NewTicker(time.Duration(pushIntervalSeconds) * time.Second)
 	defer ticker.Stop()
@@ -278,6 +301,21 @@ loop:
 
 			var timeSeriesList []promremote.TimeSeries
 			combinedData := mergeData(ifdevData, mwan3ifstatusData, networkTraffic)
+
+			// USB device behind each tethered interface, so the ADB collector
+			// only talks to tethered phones and its metrics get the same labels.
+			usbIDs := make(map[string]string)
+			if phones != nil {
+				targets := make(map[string]bool)
+				for _, data := range combinedData {
+					if id, err := usbDeviceID("/sys", data.Device); err == nil {
+						usbIDs[data.Device] = id
+						targets[id] = true
+					}
+				}
+				phones.setTargets(targets)
+			}
+
 			for _, data := range combinedData {
 				device, err := getUSBDevice(data.Device)
 				if err != nil {
@@ -391,6 +429,13 @@ loop:
 						Value:     float64(data.RX),
 					},
 				})
+
+				if id, ok := usbIDs[data.Device]; ok {
+					timeSeriesList = phones.appendSeries(timeSeriesList, id, []promremote.Label{
+						{Name: "device", Value: device},
+						{Name: "interface", Value: iface},
+					}, time.Now())
+				}
 			}
 
 			// Push metrics

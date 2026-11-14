@@ -1,0 +1,98 @@
+@@battery
+Current Battery Service state:
+  AC powered: false
+  USB powered: true
+  Wireless powered: false
+  Dock powered: false
+  Max charging current: 500000
+  Max charging voltage: 5000000
+  Charge counter: 4407246
+  status: 2
+  health: 2
+  present: true
+  level: 87
+  scale: 100
+  voltage: 4211
+  temperature: 240
+  technology: Li-ion
+  Charging state: 0
+  Charging policy: 0
+  vbus state: true
+  lpd state: false
+  cid state: 0
+  Full capacity: 5065800
+  Full design capacity: 5082000
+  charge watt: 2
+  last charge watt: 2
+  AdaptiveCharging: config package:com.motorola.actions, mUpperLimit:-1, mLowerLimit:-1, mChargingDisabled:false, mLastLimitsUpdateTime:64507821 (109637 ms ago), mLastChargingStatusChangedTime:NOT SET, Health service:com.motorola.server.health.MotoHealthServiceWrapperHidl@3331de9
+  charge watt design: 0
+  last charge watt design: 0
+  charge type: -1
+  cycle count: 83
+  charge counter property: 4407246
+  current now property: 150900
+  current average property: 435400
+  capacity property: 87
+  energy counter property: 87
+  status property: 2
+  charging policy property: 2
+  manufacturing date property: 2
+  first usage date property: 2
+  state of health property: 2
+@@thermal
+IsStatusOverride: false
+ThermalEventListeners:
+	callbacks: 4
+	killed: false
+	broadcasts count: -1
+ThermalStatusListeners:
+	callbacks: 6
+	killed: false
+	broadcasts count: -1
+Thermal Status: 0
+Cached temperatures:
+	Temperature{mValue=45.73, mType=0, mName=CPU, mStatus=0}
+	Temperature{mValue=45.837, mType=1, mName=GPU, mStatus=0}
+	Temperature{mValue=46.754, mType=9, mName=NPU, mStatus=0}
+	Temperature{mValue=26.743, mType=3, mName=SKIN, mStatus=0}
+	Temperature{mValue=19.0, mType=2, mName=BATTERY, mStatus=0}
+	Temperature{mValue=22.967, mType=5, mName=POWER_AMPLIFIER, mStatus=0}
+HAL Ready: true
+HAL connection:
+	ThermalHAL 2.0 connected: yes
+Current temperatures from HAL:
+	Temperature{mValue=29.74, mType=0, mName=CPU, mStatus=0}
+	Temperature{mValue=29.74, mType=1, mName=GPU, mStatus=0}
+	Temperature{mValue=24.0, mType=2, mName=BATTERY, mStatus=0}
+	Temperature{mValue=28.601, mType=3, mName=SKIN, mStatus=0}
+	Temperature{mValue=28.46, mType=5, mName=POWER_AMPLIFIER, mStatus=0}
+	Temperature{mValue=29.571, mType=9, mName=NPU, mStatus=0}
+Current cooling devices from HAL:
+	CoolingDevice{mValue=0, mType=2, mName=thermal-cpufreq-0}
+	CoolingDevice{mValue=0, mType=2, mName=thermal-cpufreq-1}
+	CoolingDevice{mValue=0, mType=4, mName=mutt-pa1}
+	CoolingDevice{mValue=0, mType=4, mName=mutt-pa2}
+	CoolingDevice{mValue=0, mType=4, mName=tx-pwr-pa1}
+	CoolingDevice{mValue=0, mType=4, mName=tx-pwr-pa2}
+	CoolingDevice{mValue=0, mType=4, mName=scg-off-pa2}
+	CoolingDevice{mValue=0, mType=2, mName=thermal-devfreq-0}
+Temperature static thresholds from HAL:
+	TemperatureThreshold{mType=0, mName=CPU, mHotThrottlingThresholds=[NaN, NaN, NaN, 85.0, 90.0, 100.0, 117.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=1, mName=GPU, mHotThrottlingThresholds=[NaN, NaN, NaN, 85.0, 90.0, 100.0, 117.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=2, mName=BATTERY, mHotThrottlingThresholds=[NaN, NaN, NaN, 50.0, 55.0, 59.0, 90.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=3, mName=SKIN, mHotThrottlingThresholds=[NaN, NaN, NaN, 47.0, 56.0, 58.0, 80.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=5, mName=POWER_AMPLIFIER, mHotThrottlingThresholds=[NaN, NaN, NaN, 68.0, 90.0, 100.0, 110.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=9, mName=NPU, mHotThrottlingThresholds=[NaN, NaN, NaN, 85.0, 90.0, 100.0, 117.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+Temperature headroom thresholds:
+[NaN, NaN, NaN, NaN, 1.1666666, 1.3333334, 2.3333333]
+@@telephony
+  Phone Id=0
+    mServiceState={mDataRegState=0}
+    mSignalStrength=SignalStrength:{mCdma=CellSignalStrengthCdma: cdmaDbm=2147483647 cdmaEcio=2147483647 evdoDbm=2147483647 evdoEcio=2147483647 evdoSnr=2147483647 level=0,mGsm=CellSignalStrengthGsm: rssi=2147483647 ber=2147483647 mTa=2147483647 mLevel=0,mWcdma=CellSignalStrengthWcdma: ss=2147483647 ber=2147483647 rscp=2147483647 ecno=2147483647 level=0,mTdscdma=CellSignalStrengthTdscdma: rssi=2147483647 ber=2147483647 rscp=2147483647 level=0,mLte=CellSignalStrengthLte: rssi=2147483647 rsrp=2147483647 rsrq=2147483647 rssnr=2147483647 cqiTableIndex=2147483647 cqi=2147483647 ta=2147483647 level=0 parametersUseForLevel=0,mNr=CellSignalStrengthNr:{ csiRsrp = 2147483647 csiRsrq = 2147483647 csiCqiTableIndex = 2147483647 csiCqiReport = [] ssRsrp = -100 ssRsrq = -11 ssSinr = 13 level = 4 parametersUseForLevel = 0 timingAdvance = 2147483647 },primary=CellSignalStrengthNr,mMaxLevel=5}
+    mDataConnectionState=2
+    mTelephonyDisplayInfo=TelephonyDisplayInfo {network=NR, overrideNetwork=NONE, isRoaming=false}
+@@uptime
+64618.79 510942.31
+@@props
+model=motorola edge (2022)
+android=15
