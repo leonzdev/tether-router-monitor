@@ -65,6 +65,8 @@ func fakeSysfs(t *testing.T) string {
 	mk("devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0")
 	write("devices/pci0000:00/0000:00:14.0/usb1/1-3/manufacturer", "Google\n")
 	write("devices/pci0000:00/0000:00:14.0/usb1/1-3/product", "Pixel 10\n")
+	write("devices/pci0000:00/0000:00:14.0/usb1/1-2/speed", "480\n")  // USB 2.0 phone
+	write("devices/pci0000:00/0000:00:14.0/usb1/1-3/speed", "5000\n") // USB 3 phone
 	mk("bus/usb/devices")
 	for _, d := range []string{"1-2", "1-2/1-2:1.0", "1-3", "1-3/1-3:1.0"} {
 		link("../../../devices/pci0000:00/0000:00:14.0/usb1/"+d, "bus/usb/devices/"+filepath.Base(d))
@@ -88,6 +90,18 @@ func TestUSBNetdevAndName(t *testing.T) {
 	}
 	if got := usbDeviceName(root, "9-9"); got != "" {
 		t.Errorf("name of missing device = %q, want empty", got)
+	}
+}
+
+func TestUSBSpeed(t *testing.T) {
+	root := fakeSysfs(t)
+	for id, want := range map[string]float64{"1-2": 480, "1-3": 5000} {
+		if got, ok := usbSpeedMbps(root, id); !ok || got != want {
+			t.Errorf("usbSpeedMbps(%s) = %v, %v; want %v", id, got, ok, want)
+		}
+	}
+	if got, ok := usbSpeedMbps(root, "9-9"); ok {
+		t.Errorf("missing device: got %v, want not ok", got)
 	}
 }
 
@@ -156,6 +170,8 @@ func TestAppendUntethered(t *testing.T) {
 		snaps: map[string]phoneSnapshot{
 			"1-2": {Up: true, Tethering: true, Name: "motorola motorola edge (2022)", SampledAt: now, Samples: []sample{{Name: "tether_phone_battery_level_percent", Value: 90}}},
 			"1-3": {Up: true, Tethering: false, Name: "motorola motorola edge 2024", SampledAt: now, Samples: []sample{{Name: "tether_phone_battery_level_percent", Value: 80}}},
+			// Tethered at its last poll but unmatched now: being unplugged, so not "untethered".
+			"1-4": {Up: true, Target: true, Tethering: true, Name: "Google Pixel 8", SampledAt: now, Samples: []sample{{Name: "tether_phone_battery_level_percent", Value: 76}}},
 		},
 	}
 	list := c.appendUntethered(nil, map[string]bool{"1-2": true}, now)

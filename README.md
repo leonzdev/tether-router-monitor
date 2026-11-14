@@ -21,6 +21,24 @@ router's `PATH`.
 | `ADB_TIMEOUT_SECONDS` | `20` | Time limit for one phone's query |
 | `ADB_RETETHER` | `1` | Set to `0` to stop switching USB tethering back on for known phones |
 
+## Interface metrics
+
+One series per tethered interface, labelled with `device` (the phone's USB
+name) and `interface`.
+
+| Metric | |
+|---|---|
+| `tether_iface_status_online` | 1 if mwan3 reports the interface online |
+| `tether_iface_status_enabled` | 1 unless mwan3 reports it disabled |
+| `tether_iface_status_tracking` | 1 if mwan3 tracking is active |
+| `tether_iface_up_time` | Seconds since the interface came up |
+| `tether_iface_online_time` | Seconds since mwan3 last marked it online |
+| `tether_iface_rx`, `tether_iface_tx` | Bytes received and sent |
+| `tether_iface_usb_speed_mbps{usb_port}` | USB link speed: 480 means the phone runs in USB 2.0 mode (a USB 2.0 phone, or a USB 2.0-only cable), 5000 or 10000 means USB 3. `usb_port` is the kernel's bus-port path (e.g. `2-3`); a port's USB 2.0 and USB 3 sides are on different buses |
+
+An interface whose USB device can't be found (for a moment while a phone is
+being unplugged) is skipped, so no series without a `device` label is pushed.
+
 ## Phone metrics over ADB
 
 For tethered phones with USB debugging on, the monitor speaks ADB over the same
@@ -92,7 +110,7 @@ Labelled with `device` and `interface`, like the `tether_iface_*` series.
 | `tether_phone_battery_status` | 1 unknown, 2 charging, 3 discharging, 4 not charging, 5 full |
 | `tether_phone_battery_health` | 1 unknown, 2 good, 3 overheat, 4 dead, 5 over voltage, 6 failure, 7 cold |
 | `tether_phone_battery_plugged` | 1 when on external power |
-| `tether_phone_battery_max_charging_current_amps` | What the USB port or charger offers |
+| `tether_phone_battery_max_charging_current_amps` | What the USB port offers, as the phone sees it. A standard port gives 0.5 A in USB 2.0 mode and 0.9 A in USB 3 mode; a charging port (BC 1.2) gives up to 1.5 A |
 | `tether_phone_battery_max_charging_voltage_volts` | |
 | `tether_phone_battery_charge_counter_mah` | Remaining charge; its value at 100% tracks capacity fade |
 | `tether_phone_battery_cycle_count` | Only on phones that report it (e.g. Motorola) |
