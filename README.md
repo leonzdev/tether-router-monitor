@@ -19,14 +19,16 @@ router's `PATH`.
 | `ADB_KEY_PATH` | `/etc/tether-router-monitor/adbkey` | ADB private key, created on first run |
 | `ADB_INTERVAL_SECONDS` | `60` | How often to query the phones |
 | `ADB_TIMEOUT_SECONDS` | `20` | Time limit for one phone's query |
+| `ADB_RETETHER` | `1` | Set to `0` to stop switching USB tethering back on for known phones |
 
 ## Phone metrics over ADB
 
 For tethered phones with USB debugging on, the monitor speaks ADB over the same
 USB cable that carries the tethering link. It does this itself through Linux
 usbfs ([go-adb](https://github.com/pgaskin/go-adb)), so the router needs no
-`adb` binary or adb server. Phones without USB debugging are skipped, and only
-phones that back a tethered interface are touched.
+`adb` binary or adb server. Phones without USB debugging are skipped. The
+monitor only touches phones that back a tethered interface, or have done so
+before (see below).
 
 Setup:
 
@@ -38,6 +40,26 @@ Setup:
    restart the monitor or replug the phone to see it again.
 3. Add `/etc/tether-router-monitor/` to `/etc/sysupgrade.conf` so the key
    survives firmware upgrades; otherwise every phone has to be approved again.
+
+### Switching tethering back on
+
+Android turns USB tethering off whenever the cable is unplugged, including
+when the router reboots, and it stays off after the phone is plugged back in.
+The monitor remembers every phone it has seen tethering through the router, by
+USB serial, in `tether-phones` next to the ADB key. When one of those phones is
+plugged in with tethering off, the monitor switches it back on over ADB.
+
+- It uses `svc usb setFunctions rndis|ncm`, picking the function the phone
+  itself reports for USB tethering. Newer Pixels only do NCM.
+- If tethering stays off, it retries after 2 minutes, then waits twice as long
+  each time, up to 30 minutes.
+- Turn it off with `ADB_RETETHER=0`, or forget a phone by deleting its line from
+  the file.
+- `-adb-dump` never changes anything on the phones.
+
+While a known phone isn't tethering, its metrics are still reported, labelled
+with its `device` name only (no `interface`), and with
+`tether_phone_usb_tethering` 0.
 
 Notes:
 
@@ -61,6 +83,7 @@ Labelled with `device` and `interface`, like the `tether_iface_*` series.
 | Metric | |
 |---|---|
 | `tether_phone_adb_up` | 1 if the last query worked, 0 while awaiting approval or on errors |
+| `tether_phone_usb_tethering` | 1 if the phone's USB tethering is on (it has a network interface on the router) |
 | `tether_phone_info{model,android}` | Always 1 |
 | `tether_phone_uptime_seconds` | |
 | `tether_phone_battery_level_percent` | |

@@ -305,6 +305,7 @@ loop:
 			// USB device behind each tethered interface, so the ADB collector
 			// only talks to tethered phones and its metrics get the same labels.
 			usbIDs := make(map[string]string)
+			matchedPhones := make(map[string]bool)
 			if phones != nil {
 				targets := make(map[string]bool)
 				for _, data := range combinedData {
@@ -431,11 +432,17 @@ loop:
 				})
 
 				if id, ok := usbIDs[data.Device]; ok {
+					matchedPhones[id] = true
 					timeSeriesList = phones.appendSeries(timeSeriesList, id, []promremote.Label{
 						{Name: "device", Value: device},
 						{Name: "interface", Value: iface},
 					}, time.Now())
 				}
+			}
+
+			// Known phones plugged in without USB tethering (no interface label).
+			if phones != nil {
+				timeSeriesList = phones.appendUntethered(timeSeriesList, matchedPhones, time.Now())
 			}
 
 			// Push metrics

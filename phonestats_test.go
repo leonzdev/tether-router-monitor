@@ -338,6 +338,19 @@ func TestParsePhoneStatsMotoEdge2022(t *testing.T) {
 	}
 }
 
+func TestParseTetherFunction(t *testing.T) {
+	for out, want := range map[string]string{
+		"@@tethering\n    mUsbTetheringFunction: RNDIS\n@@uptime\n1 2\n": "RNDIS",
+		"@@tethering\n    mUsbTetheringFunction: NCM\n":                  "NCM",
+		"@@tethering\n@@uptime\n1 2\n":                                   "", // older Android: no such field
+		"@@battery\n  level: 80\n":                                       "",
+	} {
+		if got := parseTetherFunction(out); got != want {
+			t.Errorf("parseTetherFunction(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
 func TestParsePhoneStatsEmpty(t *testing.T) {
 	if s := parsePhoneStats("/system/bin/sh: dumpsys: not found\n"); len(s) != 0 {
 		t.Errorf("expected no samples, got:\n%s", dump(s))

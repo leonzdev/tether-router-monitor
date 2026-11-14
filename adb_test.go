@@ -10,6 +10,7 @@ import (
 
 	"github.com/m3db/prometheus_remote_client_golang/promremote"
 	"github.com/pgaskin/go-adb/adb/adbhost"
+	"github.com/pgaskin/go-adb/adb/adbusb"
 )
 
 // fakeSysfs builds a minimal /sys with usb0 on USB device 1-2 (behind its
@@ -50,7 +51,124 @@ func fakeSysfs(t *testing.T) string {
 	mk("class/net")
 	link("../../devices/pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/net/usb0", "class/net/usb0")
 	link("../../devices/pci0000:00/0000:00:1f.6/net/eth0", "class/net/eth0")
+
+	// USB device strings, and a second phone (1-3) plugged in with tethering
+	// off: it only has its ADB interface, no network interface.
+	write := func(rel, content string) {
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("devices/pci0000:00/0000:00:14.0/usb1/1-2/manufacturer", "motorola\n")
+	write("devices/pci0000:00/0000:00:14.0/usb1/1-2/product", "motorola edge 2024\n")
+	touch(mk("devices/pci0000:00/0000:00:14.0/usb1/1-3"), "busnum", "devnum")
+	mk("devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0")
+	write("devices/pci0000:00/0000:00:14.0/usb1/1-3/manufacturer", "Google\n")
+	write("devices/pci0000:00/0000:00:14.0/usb1/1-3/product", "Pixel 10\n")
+	mk("bus/usb/devices")
+	for _, d := range []string{"1-2", "1-2/1-2:1.0", "1-3", "1-3/1-3:1.0"} {
+		link("../../../devices/pci0000:00/0000:00:14.0/usb1/"+d, "bus/usb/devices/"+filepath.Base(d))
+	}
 	return root
+}
+
+func TestUSBNetdevAndName(t *testing.T) {
+	root := fakeSysfs(t)
+	if !usbHasNetdev(root, "1-2") {
+		t.Error("1-2 has usb0, want tethering on")
+	}
+	if usbHasNetdev(root, "1-3") {
+		t.Error("1-3 has no network interface, want tethering off")
+	}
+	if got := usbDeviceName(root, "1-2"); got != "motorola motorola edge 2024" {
+		t.Errorf("name of 1-2 = %q", got)
+	}
+	if got := usbDeviceName(root, "1-3"); got != "Google Pixel 10" {
+		t.Errorf("name of 1-3 = %q", got)
+	}
+	if got := usbDeviceName(root, "9-9"); got != "" {
+		t.Errorf("name of missing device = %q, want empty", got)
+	}
+}
+
+func TestRetetherBackoff(t *testing.T) {
+	for attempts, want := range map[int]time.Duration{
+		1: 2 * time.Minute, 2: 4 * time.Minute, 3: 8 * time.Minute, 4: 16 * time.Minute, 5: 30 * time.Minute, 20: 30 * time.Minute,
+	} {
+		if got := retetherBackoff(attempts); got != want {
+			t.Errorf("retetherBackoff(%d) = %s, want %s", attempts, got, want)
+		}
+	}
+}
+
+func TestKnownPhonesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "tether-phones")
+	if got, err := loadSerials(path); err != nil || len(got) != 0 {
+		t.Fatalf("missing file: %v, %v; want empty", got, err)
+	}
+	if err := saveSerials(path, map[string]bool{"ZD222RVW8F": true, "AAA": true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(must(os.ReadFile(path)), []byte("  # a comment\n\nBBB # inline\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadSerials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || !got["ZD222RVW8F"] || !got["AAA"] || !got["BBB"] {
+		t.Errorf("loaded %v", got)
+	}
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func TestLearnPersistsNewPhonesOnce(t *testing.T) {
+	dir := t.TempDir()
+	c := &adbCollector{cfg: adbConfig{KeyPath: filepath.Join(dir, "adbkey")}, known: map[string]bool{}}
+	c.learn(&adbusb.DeviceInfo{ID: "1-2", Serial: "ZD222RVW8F"})
+	c.learn(&adbusb.DeviceInfo{ID: "1-3"}) // no serial: can't be remembered
+	path := filepath.Join(dir, "tether-phones")
+	got, err := loadSerials(path)
+	if err != nil || len(got) != 1 || !got["ZD222RVW8F"] {
+		t.Fatalf("after learning: %v, %v", got, err)
+	}
+	st1, _ := os.Stat(path)
+	time.Sleep(10 * time.Millisecond)
+	c.learn(&adbusb.DeviceInfo{ID: "1-2", Serial: "ZD222RVW8F"})
+	if st2, _ := os.Stat(path); !st2.ModTime().Equal(st1.ModTime()) {
+		t.Error("re-learning a known phone rewrote the file")
+	}
+	if !c.isKnown("ZD222RVW8F") || c.isKnown("") || c.isKnown("other") {
+		t.Error("isKnown")
+	}
+}
+
+func TestAppendUntethered(t *testing.T) {
+	now := time.Now()
+	c := &adbCollector{
+		cfg: adbConfig{Interval: time.Minute, Timeout: 20 * time.Second},
+		snaps: map[string]phoneSnapshot{
+			"1-2": {Up: true, Tethering: true, Name: "motorola motorola edge (2022)", SampledAt: now, Samples: []sample{{Name: "tether_phone_battery_level_percent", Value: 90}}},
+			"1-3": {Up: true, Tethering: false, Name: "motorola motorola edge 2024", SampledAt: now, Samples: []sample{{Name: "tether_phone_battery_level_percent", Value: 80}}},
+		},
+	}
+	list := c.appendUntethered(nil, map[string]bool{"1-2": true}, now)
+	got := make(map[string]float64)
+	for _, ts := range list {
+		if len(ts.Labels) != 2 || ts.Labels[1].Name != "device" || ts.Labels[1].Value != "motorola motorola edge 2024" {
+			t.Fatalf("untethered phone should carry only its device label, got %v", ts.Labels)
+		}
+		got[ts.Labels[0].Value] = ts.Datapoint.Value
+	}
+	if len(got) != 3 || got["tether_phone_usb_tethering"] != 0 || got["tether_phone_adb_up"] != 1 || got["tether_phone_battery_level_percent"] != 80 {
+		t.Errorf("untethered series: %v", got)
+	}
 }
 
 func TestUSBDeviceID(t *testing.T) {
@@ -104,14 +222,14 @@ func TestAppendSeries(t *testing.T) {
 		return m
 	}
 
-	if got := names(c.appendSeries(nil, "1-1", base, now)); len(got) != 2 || got["tether_phone_adb_up"] != 1 || got["tether_phone_battery_level_percent"] != 80 {
+	if got := names(c.appendSeries(nil, "1-1", base, now)); len(got) != 3 || got["tether_phone_adb_up"] != 1 || got["tether_phone_battery_level_percent"] != 80 {
 		t.Errorf("fresh phone: got %v", got)
 	}
-	if got := names(c.appendSeries(nil, "1-2", base, now)); len(got) != 1 || got["tether_phone_adb_up"] != 0 {
-		t.Errorf("stale phone should only report adb_up=0, got %v", got)
+	if got := names(c.appendSeries(nil, "1-2", base, now)); len(got) != 2 || got["tether_phone_adb_up"] != 0 {
+		t.Errorf("stale phone should only report adb_up=0 and usb_tethering, got %v", got)
 	}
-	if got := names(c.appendSeries(nil, "1-3", base, now)); len(got) != 1 || got["tether_phone_adb_up"] != 0 {
-		t.Errorf("unauthorized phone should only report adb_up=0, got %v", got)
+	if got := names(c.appendSeries(nil, "1-3", base, now)); len(got) != 2 || got["tether_phone_adb_up"] != 0 {
+		t.Errorf("unauthorized phone should only report adb_up=0 and usb_tethering, got %v", got)
 	}
 	if got := c.appendSeries(nil, "1-9", base, now); len(got) != 0 {
 		t.Errorf("phone without ADB should get nothing, got %v", got)
