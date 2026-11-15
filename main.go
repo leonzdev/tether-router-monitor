@@ -218,6 +218,30 @@ func mergeData(ifdevData []Ifdev, mwan3Data []Mwan3ifstatus, networkTrafficData 
 	return combined
 }
 
+// collectInterfaces returns mwan3's USB (tethered phone) interfaces with their
+// mwan3 status and traffic counters, from the ifdev and mwan3ifstatus helpers
+// and ifconfig.
+func collectInterfaces() ([]CombinedData, error) {
+	ifdevOutput, err := executeShellCommand("ifdev")
+	if err != nil {
+		return nil, fmt.Errorf("Error executing ifdev: %v", err)
+	}
+	mwan3ifstatusOutput, err := executeShellCommand("mwan3ifstatus")
+	if err != nil {
+		return nil, fmt.Errorf("Error executing mwan3ifstatus: %v", err)
+	}
+	networkTraffic, err := getNetworkTraffic()
+	if err != nil {
+		log.Println("Error getting network traffic:", err)
+	}
+
+	var ifdevData []Ifdev
+	var mwan3ifstatusData []Mwan3ifstatus
+	json.Unmarshal(ifdevOutput, &ifdevData)
+	json.Unmarshal(mwan3ifstatusOutput, &mwan3ifstatusData)
+	return mergeData(filterUSBInterfaces(ifdevData), mwan3ifstatusData, networkTraffic), nil
+}
+
 func pushMetrics(timeSeriesList []promremote.TimeSeries) {
 	cfg := promremote.NewConfig(
 		promremote.WriteURLOption(pushURL),
@@ -259,11 +283,17 @@ func validateParameters() error {
 func main() {
 	adbDump := flag.Bool("adb-dump", false, "connect to every USB ADB device on this machine, print its phone metrics, and exit")
 	adbRaw := flag.Bool("adb-raw", false, "with -adb-dump, also print the raw output read from each phone")
+	speedNow := flag.Bool("speedtest-now", false, "run one speed test through each online tethered interface, print the results, and exit")
+	speedDevs := flag.String("speedtest-dev", "", "with -speedtest-now, test these network interfaces instead (comma-separated, e.g. usb2)")
 	flag.Parse()
 
 	adbCfg := loadADBConfig()
 	if *adbDump {
 		os.Exit(runADBDump(adbCfg, *adbRaw))
+	}
+	speedCfg := loadSpeedtestConfig()
+	if *speedNow {
+		os.Exit(runSpeedtestNow(speedCfg, *speedDevs))
 	}
 
 	if err := validateParameters(); err != nil {
@@ -285,6 +315,14 @@ func main() {
 		}
 	}
 
+	var speed *speedCollector
+	if speedCfg.Enabled {
+		speed = newSpeedCollector(speedCfg)
+		go speed.run(ctx)
+		log.Printf("Speed tests on: each phone every %s, up to %.1f MB down and %.1f MB up, %s per direction (server %s, firewall mark %#x)",
+			speedCfg.Interval, float64(speedCfg.DownloadBytes)/1e6, float64(speedCfg.UploadBytes)/1e6, speedCfg.MaxDuration, speedCfg.URL, speedCfg.FWMark)
+	}
+
 	ticker := time.NewTicker(time.Duration(pushIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
@@ -292,31 +330,13 @@ loop:
 	for {
 		select {
 		case <-ticker.C:
-			ifdevOutput, err := executeShellCommand("ifdev")
+			combinedData, err := collectInterfaces()
 			if err != nil {
-				log.Println("Error executing ifdev:", err)
+				log.Println(err)
 				break
 			}
-
-			mwan3ifstatusOutput, err := executeShellCommand("mwan3ifstatus")
-			if err != nil {
-				log.Println("Error executing mwan3ifstatus:", err)
-				break
-			}
-			networkTraffic, err := getNetworkTraffic()
-			if err != nil {
-				log.Println("Error getting network traffic:", err)
-			}
-			var ifdevData []Ifdev
-			var mwan3ifstatusData []Mwan3ifstatus
-
-			json.Unmarshal(ifdevOutput, &ifdevData)
-			json.Unmarshal(mwan3ifstatusOutput, &mwan3ifstatusData)
-
-			ifdevData = filterUSBInterfaces(ifdevData)
 
 			var timeSeriesList []promremote.TimeSeries
-			combinedData := mergeData(ifdevData, mwan3ifstatusData, networkTraffic)
 
 			// USB device behind each tethered interface: for its USB link speed,
 			// and so the ADB collector only talks to tethered phones and its
@@ -324,7 +344,10 @@ loop:
 			usbIDs := make(map[string]string)
 			matchedPhones := make(map[string]bool)
 			targets := make(map[string]bool)
+			var speedIfaces []string
+			var speedTargets []speedTarget
 			for _, data := range combinedData {
+				speedIfaces = append(speedIfaces, data.Interface)
 				if id, err := usbDeviceID(sysRoot, data.Device); err == nil {
 					usbIDs[data.Device] = id
 					targets[id] = true
@@ -463,11 +486,22 @@ loop:
 						timeSeriesList = phones.appendSeries(timeSeriesList, id, base, time.Now())
 					}
 				}
+
+				if speed != nil {
+					speedTargets = append(speedTargets, speedTarget{Iface: iface, Netdev: data.Device, Device: device, Online: status == "online"})
+					timeSeriesList = speed.appendSeries(timeSeriesList, iface, device, []promremote.Label{
+						{Name: "device", Value: device},
+						{Name: "interface", Value: iface},
+					}, time.Now())
+				}
 			}
 
 			// Known phones plugged in without USB tethering (no interface label).
 			if phones != nil {
 				timeSeriesList = phones.appendUntethered(timeSeriesList, matchedPhones, time.Now())
+			}
+			if speed != nil {
+				speed.setTargets(speedIfaces, speedTargets)
 			}
 
 			// Push metrics

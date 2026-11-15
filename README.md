@@ -3,7 +3,7 @@
 Runs on an OpenWrt router (with mwan3) and pushes metrics about USB-tethered
 phones to a Prometheus remote-write endpoint: interface status, uptime and
 traffic, plus battery, thermal and signal stats for phones with USB debugging
-enabled.
+enabled, and optionally periodic speed tests through each phone.
 
 The helper scripts in `bin/` (`ifdev`, `ifusb`, `mwan3ifstatus`) must be on the
 router's `PATH`.
@@ -20,6 +20,13 @@ router's `PATH`.
 | `ADB_INTERVAL_SECONDS` | `60` | How often to query the phones |
 | `ADB_TIMEOUT_SECONDS` | `20` | Time limit for one phone's query |
 | `ADB_RETETHER` | `1` | Set to `0` to stop switching USB tethering back on for known phones |
+| `SPEEDTEST_ENABLED` | `0` | Set to `1` to run speed tests through each phone (uses mobile data, see [Speed tests](#speed-tests)) |
+| `SPEEDTEST_INTERVAL_MINUTES` | `60` | How often each phone is tested |
+| `SPEEDTEST_DOWNLOAD_MB`, `SPEEDTEST_UPLOAD_MB` | `10`, `5` | Data cap per test for each direction (MB = 10⁶ bytes); `0` skips that direction |
+| `SPEEDTEST_MAX_SECONDS` | `5` | Time cap for each direction |
+| `SPEEDTEST_BUSY_MBPS` | `2` | Postpone a test while the phone carries more other traffic than this; `0` never postpones |
+| `SPEEDTEST_URL` | `https://speed.cloudflare.com` | Speed test server |
+| `SPEEDTEST_FWMARK` | mwan3's mask, normally `0x3f00` | Firewall mark for test traffic; `0` for none |
 
 ## Interface metrics
 
@@ -128,6 +135,77 @@ Labelled with `device` and `interface`, like the `tether_iface_*` series.
 | `tether_phone_mobile_data_connected{slot}` | 1 when the mobile data connection is up |
 
 Empty SIM slots are skipped. Fields a phone doesn't report are omitted.
+
+## Speed tests
+
+With `SPEEDTEST_ENABLED=1`, the monitor measures download and upload speed and
+latency through each tethered phone, hourly by default. It's off by default
+because every test uses mobile data.
+
+- **One phone at a time.** Each interface gets its own fixed time within the
+  interval, spread evenly over the interfaces mwan3 knows. With 5 interfaces
+  and hourly tests, they run at :06, :18, :30, :42 and :54. After a restart,
+  each phone waits for its next slot, so restarts don't set off extra tests.
+- **Through that phone only.** mwan3 load-balances the router's own traffic
+  too, so test connections are pinned the way `mwan3 use` pins a command: bound
+  to the phone's interface and given mwan3's default firewall mark, which
+  mwan3's rules leave alone. Setting the mark needs root.
+- **Skips and waits.** A phone that is unplugged or that mwan3 reports offline
+  at its slot is tested once it's back, at most twice per interval. While a
+  phone carries more than `SPEEDTEST_BUSY_MBPS` of other traffic, its test
+  waits 5 minutes, up to 3 times, then runs anyway.
+- **Each test:** 5 TCP handshakes with the server time the idle latency. Then
+  it downloads over 4 connections until the data cap or the time cap, and
+  uploads the same way. Throughput is the rate between the moments 20% and 90%
+  of the bytes had moved, which leaves out TCP's ramp-up and the tail. TCP
+  handshakes timed during the transfers show how much a busy link delays
+  everything else, which is usually the number that makes a cellular link feel
+  slow.
+
+The server is Cloudflare's speed test API (the one speed.cloudflare.com uses).
+It's anycast, so each phone reaches the nearest Cloudflare data center through
+its own carrier. It isn't an official, documented API; `SPEEDTEST_URL` can
+point at any server with the same `/__down?bytes=N` and `/__up` endpoints.
+
+### Data use
+
+A test uses at most its caps, 15 MB by default; slower links use less. Run
+hourly, that is up to about 11 GB per phone per month. It counts against the
+phone's plan like any tethered traffic, and shows up in `tether_iface_rx` and
+`tether_iface_tx`. Small caps read fast links low, because TCP is still
+speeding up when the cap is reached:
+
+| Caps per test | Per phone per month, hourly | Reads well up to about |
+|---|---|---|
+| 10 MB down + 5 MB up (default) | 11 GB | 100 Mb/s |
+| 25 MB down + 10 MB up | 25 GB | 200 Mb/s |
+
+A test keeps the phone's link busy for up to `2 × SPEEDTEST_MAX_SECONDS`, which
+can delay mwan3's tracking pings. mwan3's defaults (a ping every 10 s, offline
+after 5 misses in a row) ride that out easily. Keep the time cap well below
+`interval × down` of your mwan3 tracking settings.
+
+To try it, run `tether-router-monitor -speedtest-now`. It tests each online
+tethered interface once and prints the results, whether or not
+`SPEEDTEST_ENABLED` is set, and it uses the same caps. It needs the helpers
+on `PATH`, like the service (for example `PATH=/root/.bin:$PATH`).
+`-speedtest-dev usb2` tests just that network interface, without the helpers.
+
+### Metrics
+
+Labelled with `device` and `interface`, like the `tether_iface_*` series. The
+results of a test are pushed until 1.5 intervals after it ran.
+
+| Metric | |
+|---|---|
+| `tether_iface_speedtest_download_mbps` | Download speed |
+| `tether_iface_speedtest_upload_mbps` | Upload speed |
+| `tether_iface_speedtest_latency_seconds{phase}` | Median TCP handshake time with the server: `idle` before the transfers, `download` and `upload` during them |
+| `tether_iface_speedtest_jitter_seconds` | Mean change between consecutive idle samples |
+| `tether_iface_speedtest_server_info{colo}` | The Cloudflare data center that answered (e.g. `SEA`); always 1 |
+| `tether_iface_speedtest_success` | 1 if the latest test worked |
+| `tether_iface_speedtest_last_run_timestamp_seconds` | When the latest test ran (Unix time) |
+| `tether_iface_speedtest_bytes_total{direction}` | Data the tests have used since the monitor started |
 
 ## Build
 
